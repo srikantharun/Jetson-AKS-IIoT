@@ -1,0 +1,451 @@
+---
+# Namespace for the Shelf Inventory System
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: siwvs-system
+  labels:
+    app: siwvs
+    role: inventory-management
+
+---
+# Persistent Volume Claim for ML model storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-models-pvc
+  namespace: siwvs-system
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 2Gi
+
+---
+# Persistent Volume Claim for inventory database
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: inventory-db-pvc
+  namespace: siwvs-system
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# ConfigMap for ROS 2 environment variables
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ros2-config
+  namespace: siwvs-system
+data:
+  ROS_DOMAIN_ID: "42"
+  RMW_IMPLEMENTATION: "rmw_cyclonedds_cpp"
+  CYCLONEDDS_URI: "<CycloneDDS><Domain><Id>42</Id></Domain></CycloneDDS>"
+
+---
+# ConfigMap for sensor configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sensor-config
+  namespace: siwvs-system
+data:
+  weight_sensors.yaml: |
+    weight_threshold: 0.05
+    calibration_factor: 1.0
+    sampling_rate: 10
+    filtering: true
+    filter_type: moving_average
+    filter_window: 5
+    units: kg
+
+  camera_config.yaml: |
+    frame_rate: 15.0
+    resolution:
+      width: 1280
+      height: 720
+    detection:
+      confidence_threshold: 0.7
+      nms_threshold: 0.45
+      min_size: 20
+
+  product_catalog.json: |
+    {
+      "product_001": {
+        "name": "Product 1",
+        "weight": 0.5,
+        "category": "Category A",
+        "dimensions": [10, 15, 5]
+      },
+      "product_002": {
+        "name": "Product 2",
+        "weight": 0.75,
+        "category": "Category B",
+        "dimensions": [12, 8, 4]
+      },
+      "product_003": {
+        "name": "Product 3",
+        "weight": 0.3,
+        "category": "Category A",
+        "dimensions": [5, 5, 10]
+      }
+    }
+
+---
+# Deployment for Weight Sensor Node
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weight-sensor-controller
+  namespace: siwvs-system
+  labels:
+    app: siwvs
+    component: weight-sensor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: siwvs
+      component: weight-sensor
+  template:
+    metadata:
+      labels:
+        app: siwvs
+        component: weight-sensor
+    spec:
+      containers:
+      - name: weight-sensor-node
+        image: ${REGISTRY}/siwvs/ros2-weight:latest
+        imagePullPolicy: Always
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "200m"
+            memory: "128Mi"
+        env:
+        - name: ROS_DOMAIN_ID
+          valueFrom:
+            configMapKeyRef:
+              name: ros2-config
+              key: ROS_DOMAIN_ID
+        - name: RMW_IMPLEMENTATION
+          valueFrom:
+            configMapKeyRef:
+              name: ros2-config
+              key: RMW_IMPLEMENTATION
+        - name: CYCLONEDDS_URI
+          valueFrom:
+            configMapKeyRef:
+              name: ros2-config
+              key: CYCLONEDDS_URI
+        volumeMounts:
+        - name: sensor-config-volume
+          mountPath: /config
+        - name: dev-volume
+          mountPath: /dev
+        ports:
+        - containerPort: 9090
+          name: rosbridge
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            source /opt/ros/humble/setup.bash && \
+            source /ros2_ws/install/setup.bash && \
+            ros2 run siwvs_control weight_sensor_node.py \
+              --ros-args \
+              -p config_file:=/config/weight_sensors.yaml \
+              -p sampling_rate:=10.0
+      volumes:
+      - name: sensor-config-volume
+        configMap:
+          name: sensor-config
+      - name: dev-volume
+        hostPath:
+          path: /dev
+      nodeSelector:
+        hardware: jetson-nano
+
+---
+# Deployment for Vision System
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vision-system
+  namespace: siwvs-system
+  labels:
+    app: siwvs
+    component: vision
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: siwvs
+      component: vision
+  template:
+    metadata:
+      labels:
+        app: siwvs
+        component: vision
+    spec:
+      containers:
+      - name: vision-node
+        image: ${REGISTRY}/siwvs/ros2-vision:latest
+        imagePullPolicy: Always
+        resources:
+          limits:
+            cpu: "2"
+            memory: "2Gi"
+            nvidia.com/gpu: 1
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+        env:
+        - name: ROS_DOMAIN_ID
+          valueFrom:
+            configMapKeyRef:
+              name: ros2-config
+              key: ROS_DOMAIN_ID
+        - name: RMW_IMPLEMENTATION
+          valueFrom:
+            configMapKeyRef:
+              name: ros2-config
+              key: RMW_IMPLEMENTATION
+        - name: CYCLONEDDS_URI
+          valueFrom:
+            configMapKeyRef:
+              name: ros2-config
+              key: CYCLONEDDS_URI
+        volumeMounts:
+        - name: sensor-config-volume
+          mountPath: /config
+        - name: ml-models
+          mountPath: /models
+        - name: dev-volume
+          mountPath: /dev
+        ports:
+        - containerPort: 9091
+          name: camera-stream
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            source /opt/ros/humble/setup.bash && \
+            source /ros2_ws/install/setup.bash && \
+            ros2 run siwvs_vision camera_node.py \
+              --ros-args \
+              -p camera_topic:=/camera/image_raw \
+              -p model_path:=/models/product_detection.pb \
+              -p label_path:=/models/product_labels.txt \
+              -p confidence_threshold:=0.7
+      volumes:
+      - name: sensor-config-volume
+        configMap:
+          name: sensor-config
+      - name: ml-models
+        persistentVolumeClaim:
+          claimName: ml-models-pvc
+      - name: dev-volume
+        hostPath:
+          path: /dev
+      nodeSelector:
+        hardware: jetson-nano
+        capability: gpu
+
+---
+# Deployment for Inventory Manager
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-manager
+  namespace: siwvs-system
+  labels:
+    app: siwvs
+    component: inventory
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: siwvs
+      component: inventory
+  template:
+    metadata:
+      labels:
+        app: siwvs
+        component: inventory
+    spec:
+      containers:
+      - name: inventory-node
+        image: ${REGISTRY}/siwvs/ros2-inventory:latest
+        imagePullPolicy: Always
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+        env:
+        - name: ROS_DOMAIN_ID
+          valueFrom:
+            configMapKeyRef:
+              name: ros2-config
+              key: ROS_DOMAIN_ID
+        - name: RMW_IMPLEMENTATION
+          valueFrom:
+            configMapKeyRef:
+              name: ros2-config
+              key: RMW_IMPLEMENTATION
+        - name: CYCLONEDDS_URI
+          valueFrom:
+            configMapKeyRef:
+              name: ros2-config
+              key: CYCLONEDDS_URI
+        volumeMounts:
+        - name: sensor-config-volume
+          mountPath: /config
+        - name: inventory-data
+          mountPath: /data
+        ports:
+        - containerPort: 9092
+          name: inventory-api
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            source /opt/ros/humble/setup.bash && \
+            source /ros2_ws/install/setup.bash && \
+            cp /config/product_catalog.json /data/ && \
+            ros2 run siwvs_inventory inventory_manager.py \
+              --ros-args \
+              -p database_path:=/data/inventory.db \
+              -p product_catalog_path:=/data/product_catalog.json \
+              -p update_rate:=1.0
+      volumes:
+      - name: sensor-config-volume
+        configMap:
+          name: sensor-config
+      - name: inventory-data
+        persistentVolumeClaim:
+          claimName: inventory-db-pvc
+      nodeSelector:
+        hardware: jetson-nano
+
+---
+# Service for Weight Sensor Controller
+apiVersion: v1
+kind: Service
+metadata:
+  name: weight-sensor-service
+  namespace: siwvs-system
+spec:
+  selector:
+    app: siwvs
+    component: weight-sensor
+  ports:
+  - port: 9090
+    targetPort: 9090
+    name: rosbridge
+  type: ClusterIP
+
+---
+# Service for Vision System
+apiVersion: v1
+kind: Service
+metadata:
+  name: vision-system-service
+  namespace: siwvs-system
+spec:
+  selector:
+    app: siwvs
+    component: vision
+  ports:
+  - port: 9091
+    targetPort: 9091
+    name: camera-stream
+  type: ClusterIP
+
+---
+# Service for Inventory Manager
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-manager-service
+  namespace: siwvs-system
+spec:
+  selector:
+    app: siwvs
+    component: inventory
+  ports:
+  - port: 9092
+    targetPort: 9092
+    name: inventory-api
+  type: NodePort
+  externalTrafficPolicy: Local
+
+---
+# Web Dashboard Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-dashboard
+  namespace: siwvs-system
+  labels:
+    app: siwvs
+    component: dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: siwvs
+      component: dashboard
+  template:
+    metadata:
+      labels:
+        app: siwvs
+        component: dashboard
+    spec:
+      containers:
+      - name: dashboard
+        image: ${REGISTRY}/siwvs/dashboard:latest
+        imagePullPolicy: Always
+        resources:
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+        ports:
+        - containerPort: 80
+          name: http
+        env:
+        - name: API_ENDPOINT
+          value: "http://inventory-manager-service:9092"
+      nodeSelector:
+        hardware: jetson-nano
+
+---
+# Dashboard Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-service
+  namespace: siwvs-system
+spec:
+  selector:
+    app: siwvs
+    component: dashboard
+  ports:
+  - port: 80
+    targetPort: 80
+    name: http
+    nodePort: 30080
+  type: NodePort

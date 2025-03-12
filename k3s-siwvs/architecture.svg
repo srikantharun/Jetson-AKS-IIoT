@@ -1,0 +1,46 @@
+
+flowchart TB
+    subgraph Hardware["Hardware Layer"]
+        Camera["Cameras"]
+        WeightSensors["Weight Sensors (Load Cells)"]
+        EdgeHardware["Jetson Nano"]
+    end
+
+    subgraph k3s["Kubernetes Layer (k3s)"]
+        subgraph Pods["ROS 2 Pods"]
+            VisionNode["Vision Processing Node"]
+            WeightNode["Weight Sensor Node"]
+            InventoryNode["Inventory Manager Node"]
+            DatabaseNode["Inventory Database"]
+        end
+        
+        subgraph ML["ML Service Pods"]
+            ProductRecognition["Product Recognition ML Service"]
+            WeightCorrelation["Weight Correlation Service"]
+            StateEstimation["Inventory State Estimation"]
+        end
+
+        subgraph Storage["Storage Pods"]
+            ModelStorage["ML Model Storage"]
+            DataStorage["Inventory Data Storage"]
+        end
+
+        subgraph Interface["API & Web Interface"]
+            REST["REST API Service"]
+            WebDashboard["Inventory Dashboard"]
+        end
+    end
+
+    Camera --> VisionNode
+    WeightSensors --> WeightNode
+    VisionNode --> ProductRecognition
+    WeightNode --> WeightCorrelation
+    ProductRecognition --> InventoryNode
+    WeightCorrelation --> InventoryNode
+    InventoryNode --> StateEstimation
+    StateEstimation --> InventoryNode
+    InventoryNode --> DatabaseNode
+    DatabaseNode --> REST
+    REST --> WebDashboard
+    
+    EdgeHardware --- k3s

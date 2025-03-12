@@ -1,0 +1,6 @@
+   <depend>siwvs_msgs</depend>
+   <depend>siwvs_vision</depend>
+   <depend>siwvs_control</depend>
+   <depend>std_srvs</depend>
+   <exec_depend>python3-sqlalchemy</exec_depend>
+   <exec_depend>python3-pandas</exec_depend>

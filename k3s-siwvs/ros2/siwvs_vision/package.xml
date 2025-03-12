@@ -1,0 +1,7 @@
+   <depend>cv_bridge</depend>
+   <depend>image_transport</depend>
+   <depend>vision_msgs</depend>
+   <depend>tf2_geometry_msgs</depend>
+   <exec_depend>python3-opencv</exec_depend>
+   <exec_depend>python3-tensorflow</exec_depend>
+   <exec_depend>python3-pytorch</exec_depend>

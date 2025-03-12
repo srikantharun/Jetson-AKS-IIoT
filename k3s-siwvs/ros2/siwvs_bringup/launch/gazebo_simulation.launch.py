@@ -87,7 +87,50 @@ def generate_launch_description():
         ],
         output='screen'
     )
-    
+   
+   # Add camera node
+   camera_node = Node(
+        package='siwvs_vision',
+        executable='camera_node.py',
+        name='camera_node',
+        parameters=[{
+           'use_sim_time': use_sim_time,
+           'camera_topic': '/camera/image_raw',
+           'camera_info_topic': '/camera/camera_info',
+           'frame_rate': 15.0
+        }],
+        output='screen'
+    )
+
+    # Add product detector node
+    product_detector_node = Node(
+        package='siwvs_vision',
+           executable='product_detector.py',
+           name='product_detector',
+           parameters=[{
+               'use_sim_time': use_sim_time,
+               'model_path': os.path.join(get_package_share_directory('siwvs_vision'), 
+                                 'models/product_detection/model.pb'),
+               'label_path': os.path.join(get_package_share_directory('siwvs_vision'),
+                                 'models/product_detection/labels.txt'),
+               'confidence_threshold': 0.7
+        }],
+        output='screen'
+    )
+ 
+    # Add inventory manager node
+    inventory_manager_node = Node(
+        package='siwvs_inventory',
+        executable='inventory_manager.py',
+        name='inventory_manager',
+        parameters=[{
+           'use_sim_time': use_sim_time,
+           'database_path': '/data/inventory.db',
+           'update_rate': 1.0
+        }],
+        output='screen'
+    )
+ 
     # Controller spawner
     controller_spawner_node = Node(
         package='controller_manager',
@@ -173,7 +216,10 @@ def generate_launch_description():
     ld.add_action(joint_state_publisher_node)
     ld.add_action(gazebo_launch)
     ld.add_action(spawn_robot_node)
-    
+    ld.add_action(camera_node)
+    ld.add_action(product_detector_node)
+    ld.add_action(inventory_manager_node)
+ 
     # Add controller spawners
     event_handler = RegisterEventHandler(
         event_handler=OnProcessExit(
